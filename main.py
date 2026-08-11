@@ -1,4 +1,4 @@
-﻿"""
+"""
 Extract all available metadata + media URLs for an Instagram post/reel/carousel
 using instaloader.
 
@@ -18,6 +18,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import instaloader
 from flask import Flask, jsonify, request
@@ -63,52 +64,72 @@ def interactive_login(loader: instaloader.Instaloader, username: str) -> None:
         print(f"Session cached to {session_file}")
 
 
+def safe_value(source: Any, attr: str, default: Any = None) -> Any:
+    try:
+        return getattr(source, attr)
+    except Exception:
+        return default
+
+
 def build_post_dict(post: instaloader.Post) -> dict:
     """
-    Pull together the useful fields instaloader exposes on a Post object,
-    including per-slide media URLs for carousels.
+    Pull together the useful fields instaloader exposes on a Post object.
+    Some media URL fields are lazy and may fail if Instagram returns partial data,
+    so optional fields are read defensively.
     """
+    is_video = bool(safe_value(post, "is_video", False))
+    typename = safe_value(post, "typename")
+    post_url = safe_value(post, "url")
+    post_video_url = safe_value(post, "video_url") if is_video else None
+
     data = {
-        "shortcode": post.shortcode,
-        "post_id": post.mediaid,
-        "type": post.typename,
-        "is_video": post.is_video,
-        "title": post.title,
-        "caption": post.caption,
-        "caption_hashtags": post.caption_hashtags,
-        "caption_mentions": post.caption_mentions,
-        "owner_username": post.owner_username,
-        "owner_id": post.owner_id,
-        "date_utc": post.date_utc.isoformat(),
-        "likes": post.likes,
-        "comments": post.comments,
-        "video_view_count": post.video_view_count if post.is_video else None,
-        "video_duration": post.video_duration if post.is_video else None,
-        "location": str(post.location) if post.location else None,
-        "is_sponsored": post.is_sponsored,
-        "accessibility_caption": post.accessibility_caption,
-        "url": post.url,
-        "video_url": post.video_url if post.is_video else None,
+        "shortcode": safe_value(post, "shortcode"),
+        "post_id": safe_value(post, "mediaid"),
+        "type": typename,
+        "is_video": is_video,
+        "title": safe_value(post, "title"),
+        "caption": safe_value(post, "caption"),
+        "caption_hashtags": safe_value(post, "caption_hashtags", []),
+        "caption_mentions": safe_value(post, "caption_mentions", []),
+        "owner_username": safe_value(post, "owner_username"),
+        "owner_id": safe_value(post, "owner_id"),
+        "date_utc": safe_value(post, "date_utc").isoformat() if safe_value(post, "date_utc") else None,
+        "likes": safe_value(post, "likes"),
+        "comments": safe_value(post, "comments"),
+        "video_view_count": safe_value(post, "video_view_count") if is_video else None,
+        "video_duration": safe_value(post, "video_duration") if is_video else None,
+        "location": str(safe_value(post, "location")) if safe_value(post, "location") else None,
+        "is_sponsored": safe_value(post, "is_sponsored"),
+        "accessibility_caption": safe_value(post, "accessibility_caption"),
+        "url": post_url,
+        "video_url": post_video_url,
         "slides": [],
     }
 
-    if post.typename == "GraphSidecar":
-        for index, node in enumerate(post.get_sidecar_nodes()):
+    if typename == "GraphSidecar":
+        try:
+            nodes = list(post.get_sidecar_nodes())
+        except Exception as exc:
+            data["slides_error"] = str(exc)
+            nodes = []
+
+        for index, node in enumerate(nodes):
+            node_is_video = bool(safe_value(node, "is_video", False))
             data["slides"].append(
                 {
                     "index": index,
-                    "is_video": node.is_video,
-                    "display_url": node.display_url,
-                    "video_url": node.video_url if node.is_video else None,
+                    "is_video": node_is_video,
+                    "display_url": safe_value(node, "display_url"),
+                    "video_url": safe_value(node, "video_url") if node_is_video else None,
                 }
             )
     else:
         data["slides"].append(
             {
                 "index": 0,
-                "is_video": post.is_video,
-                "display_url": post.url,
-                "video_url": post.video_url if post.is_video else None,
+                "is_video": is_video,
+                "display_url": post_url,
+                "video_url": post_video_url,
             }
         )
 
@@ -116,6 +137,7 @@ def build_post_dict(post: instaloader.Post) -> dict:
 
 
 def fetch_instagram_metadata(url: str, login: str | None = None, allow_interactive_login: bool = False) -> dict:
+    url = url.strip()
     shortcode = extract_shortcode(url)
     loader = create_instaloader()
 
