@@ -9,7 +9,6 @@ CLI:
 API:
     flask --app main run
     POST /api/instagram {"url": "https://www.instagram.com/reel/XXXXXXXXX/"}
-    GET  /api/instagram?url=https://www.instagram.com/reel/XXXXXXXXX/
 """
 
 import argparse
@@ -190,12 +189,12 @@ def debug_config():
     )
 
 
-@app.route("/api/instagram", methods=["GET", "POST"])
-@app.route("/api/metadata", methods=["GET", "POST"])
+@app.post("/api/instagram")
+@app.post("/api/metadata")
 def instagram_metadata_endpoint():
     payload = request.get_json(silent=True) or {}
-    url = payload.get("url") or request.args.get("url")
-    login = payload.get("login") or request.args.get("login")
+    url = payload.get("url")
+    login = payload.get("login")
 
     if not url:
         return jsonify({"error": "Missing required parameter: url"}), 400
@@ -273,3 +272,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
