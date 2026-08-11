@@ -49,20 +49,40 @@ def create_instaloader() -> instaloader.Instaloader:
     )
 
 
-def write_session_from_env(username: str) -> Path | None:
-    session_b64 = os.getenv("INSTAGRAM_SESSION_B64")
-    if not session_b64:
-        return None
+def load_session_from_env(loader: instaloader.Instaloader, username: str) -> bool:
+    session_json_b64 = os.getenv("INSTAGRAM_SESSION_JSON_B64")
+    if session_json_b64:
+        session_data = json.loads(base64.b64decode(session_json_b64).decode("utf-8"))
+        loader.load_session(username, session_data)
+        return True
 
-    session_path = Path(tempfile.gettempdir()) / f"session-{username}"
-    session_path.write_bytes(base64.b64decode(session_b64))
-    return session_path
+    sessionid = os.getenv("INSTAGRAM_SESSIONID")
+    csrftoken = os.getenv("INSTAGRAM_CSRFTOKEN")
+    if sessionid and csrftoken:
+        session_data = {
+            "sessionid": sessionid,
+            "csrftoken": csrftoken,
+            "ds_user_id": os.getenv("INSTAGRAM_DS_USER_ID", ""),
+            "mid": os.getenv("INSTAGRAM_MID", ""),
+            "ig_did": os.getenv("INSTAGRAM_IG_DID", ""),
+            "datr": os.getenv("INSTAGRAM_DATR", ""),
+            "rur": os.getenv("INSTAGRAM_RUR", ""),
+        }
+        loader.load_session(username, {key: value for key, value in session_data.items() if value})
+        return True
+
+    session_b64 = os.getenv("INSTAGRAM_SESSION_B64")
+    if session_b64:
+        session_path = Path(tempfile.gettempdir()) / f"session-{username}"
+        session_path.write_bytes(base64.b64decode(session_b64))
+        loader.load_session_from_file(username, filename=str(session_path))
+        return True
+
+    return False
 
 
 def load_cached_session(loader: instaloader.Instaloader, username: str, session_dir: Path | None = None) -> None:
-    env_session_path = write_session_from_env(username)
-    if env_session_path:
-        loader.load_session_from_file(username, filename=str(env_session_path))
+    if load_session_from_env(loader, username):
         return
 
     session_path = (session_dir or Path.cwd()) / f"session-{username}"
@@ -184,6 +204,9 @@ def debug_config():
             "ok": True,
             "has_instagram_username": bool(os.getenv("INSTAGRAM_USERNAME")),
             "has_instagram_session_b64": bool(os.getenv("INSTAGRAM_SESSION_B64")),
+            "has_instagram_session_json_b64": bool(os.getenv("INSTAGRAM_SESSION_JSON_B64")),
+            "has_instagram_sessionid": bool(os.getenv("INSTAGRAM_SESSIONID")),
+            "has_instagram_csrftoken": bool(os.getenv("INSTAGRAM_CSRFTOKEN")),
             "instaloader_version": getattr(instaloader, "__version__", None),
         }
     )
@@ -206,7 +229,7 @@ def instagram_metadata_endpoint():
             jsonify(
                 {
                     "error": "Instagram session file was not found for the requested login.",
-                    "hint": "Set INSTAGRAM_USERNAME and INSTAGRAM_SESSION_B64 in Vercel, or call without login for public posts.",
+                    "hint": "Set INSTAGRAM_USERNAME plus either INSTAGRAM_SESSION_JSON_B64 or INSTAGRAM_SESSIONID and INSTAGRAM_CSRFTOKEN in Vercel, or call without login for public posts.",
                 }
             ),
             401,
@@ -218,7 +241,7 @@ def instagram_metadata_endpoint():
             "error": "Failed to fetch Instagram metadata.",
             "details": str(exc),
             "exception_type": type(exc).__name__,
-            "hint": "Instagram often blocks anonymous requests from Vercel. Add a cached Instaloader session with INSTAGRAM_USERNAME and INSTAGRAM_SESSION_B64.",
+            "hint": "Instagram often blocks anonymous requests from Vercel. Add a cached Instagram session with INSTAGRAM_USERNAME plus INSTAGRAM_SESSION_JSON_B64, or INSTAGRAM_SESSIONID and INSTAGRAM_CSRFTOKEN.",
         }
         if os.getenv("DEBUG_ERRORS") == "1":
             response["traceback"] = traceback.format_exc().splitlines()[-12:]
@@ -272,4 +295,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 
