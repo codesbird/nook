@@ -13,10 +13,13 @@ API:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
 import sys
+import tempfile
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +50,22 @@ def create_instaloader() -> instaloader.Instaloader:
     )
 
 
+def write_session_from_env(username: str) -> Path | None:
+    session_b64 = os.getenv("INSTAGRAM_SESSION_B64")
+    if not session_b64:
+        return None
+
+    session_path = Path(tempfile.gettempdir()) / f"session-{username}"
+    session_path.write_bytes(base64.b64decode(session_b64))
+    return session_path
+
+
 def load_cached_session(loader: instaloader.Instaloader, username: str, session_dir: Path | None = None) -> None:
+    env_session_path = write_session_from_env(username)
+    if env_session_path:
+        loader.load_session_from_file(username, filename=str(env_session_path))
+        return
+
     session_path = (session_dir or Path.cwd()) / f"session-{username}"
     loader.load_session_from_file(username, filename=str(session_path))
 
@@ -79,6 +97,8 @@ def build_post_dict(post: instaloader.Post) -> dict:
     """
     is_video = bool(safe_value(post, "is_video", False))
     typename = safe_value(post, "typename")
+    date_utc = safe_value(post, "date_utc")
+    location = safe_value(post, "location")
     post_url = safe_value(post, "url")
     post_video_url = safe_value(post, "video_url") if is_video else None
 
@@ -93,12 +113,12 @@ def build_post_dict(post: instaloader.Post) -> dict:
         "caption_mentions": safe_value(post, "caption_mentions", []),
         "owner_username": safe_value(post, "owner_username"),
         "owner_id": safe_value(post, "owner_id"),
-        "date_utc": safe_value(post, "date_utc").isoformat() if safe_value(post, "date_utc") else None,
+        "date_utc": date_utc.isoformat() if date_utc else None,
         "likes": safe_value(post, "likes"),
         "comments": safe_value(post, "comments"),
         "video_view_count": safe_value(post, "video_view_count") if is_video else None,
         "video_duration": safe_value(post, "video_duration") if is_video else None,
-        "location": str(safe_value(post, "location")) if safe_value(post, "location") else None,
+        "location": str(location) if location else None,
         "is_sponsored": safe_value(post, "is_sponsored"),
         "accessibility_caption": safe_value(post, "accessibility_caption"),
         "url": post_url,
@@ -158,6 +178,18 @@ def health() -> tuple[dict, int]:
     return {"ok": True, "service": "instagram-metadata-api"}, 200
 
 
+@app.get("/api/debug")
+def debug_config():
+    return jsonify(
+        {
+            "ok": True,
+            "has_instagram_username": bool(os.getenv("INSTAGRAM_USERNAME")),
+            "has_instagram_session_b64": bool(os.getenv("INSTAGRAM_SESSION_B64")),
+            "instaloader_version": getattr(instaloader, "__version__", None),
+        }
+    )
+
+
 @app.route("/api/instagram", methods=["GET", "POST"])
 @app.route("/api/metadata", methods=["GET", "POST"])
 def instagram_metadata_endpoint():
@@ -175,7 +207,7 @@ def instagram_metadata_endpoint():
             jsonify(
                 {
                     "error": "Instagram session file was not found for the requested login.",
-                    "hint": "Call without login for public posts, or provide a cached session file during deployment.",
+                    "hint": "Set INSTAGRAM_USERNAME and INSTAGRAM_SESSION_B64 in Vercel, or call without login for public posts.",
                 }
             ),
             401,
@@ -183,16 +215,15 @@ def instagram_metadata_endpoint():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return (
-            jsonify(
-                {
-                    "error": "Failed to fetch Instagram metadata.",
-                    "details": str(exc),
-                    "hint": "Instagram may be rate-limiting anonymous requests. Try again with a cached session.",
-                }
-            ),
-            502,
-        )
+        response = {
+            "error": "Failed to fetch Instagram metadata.",
+            "details": str(exc),
+            "exception_type": type(exc).__name__,
+            "hint": "Instagram often blocks anonymous requests from Vercel. Add a cached Instaloader session with INSTAGRAM_USERNAME and INSTAGRAM_SESSION_B64.",
+        }
+        if os.getenv("DEBUG_ERRORS") == "1":
+            response["traceback"] = traceback.format_exc().splitlines()[-12:]
+        return jsonify(response), 502
 
     return jsonify(data), 200
 
