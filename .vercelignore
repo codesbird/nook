@@ -1,0 +1,8 @@
+﻿__pycache__/
+*.pyc
+*.log
+instagram_output/
+instagram_data.json
+session-*
+.env
+.venv/

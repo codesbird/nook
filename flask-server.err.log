@@ -2,3 +2,9 @@ WARNING: This is a development server. Do not use it in a production deployment.
  * Running on http://127.0.0.1:5000
 Press CTRL+C to quit
 127.0.0.1 - - [11/Aug/2026 18:27:05] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [11/Aug/2026 18:29:09] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [11/Aug/2026 18:29:16] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [11/Aug/2026 18:29:17] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [11/Aug/2026 18:31:01] "GET /api/instagram HTTP/1.1" 400 -
+127.0.0.1 - - [11/Aug/2026 18:31:18] "GET /api/instagram?url=https://www.instagram.com/reel/DT-Q5CnExc4/?igsh=MXFiZGFiYml5cjdtcg== HTTP/1.1" 200 -
+127.0.0.1 - - [11/Aug/2026 18:31:42] "GET /api/instagram?url=https://www.instagram.com/p/DbkIm1Al-6p/?img_index=3 HTTP/1.1" 200 -
